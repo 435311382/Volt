@@ -8,8 +8,7 @@ using System.Windows.Forms;
 namespace Volt
 {
     /// <summary>
-    /// 托盘图标点开的小浮窗。行为和 Twinkle Tray 一致：
-    /// 点托盘图标弹出，点外面自动收起，不进任务栏。
+    /// 托盘图标点开的小浮窗：点托盘图标弹出，点外面自动收起，不进任务栏。
     /// </summary>
     public sealed class MainForm : Form
     {
@@ -243,7 +242,7 @@ namespace Volt
         // ================================================================
 
         // 浮窗刻意不可拖动：它是贴在任务栏上方的弹出面板，
-        // 位置由 PositionFlyout() 决定，和 Twinkle Tray 一致。
+        // 位置由 PositionFlyout() 决定。
         // 之前用 HTCAPTION 让标题栏可拖动，结果一点就飘走，很难用。
 
         private const int WM_ERASEBKGND = 0x0014;
