@@ -1,0 +1,4 @@
+Volt.exe
+*.obj
+*.pdb
+.vs/
