@@ -24,7 +24,7 @@ You can get the first two with any HID enumeration tool. `docs/ADDING-A-DEVICE.m
 
 - Comments explain why, not what. A comment that restates the next line should be deleted.
 - Hard-won knowledge belongs in a comment next to the code that depends on it — the interface-ordering trap, the sleep behaviour, the checksum that is not a checksum. Those are the parts a reader cannot recover by reading the code alone.
-- UI text is English in the interface and English in the repository. Protocol notes may quote vendor strings verbatim.
+- Repository text is English. The application interface is Simplified Chinese. Code comments are Chinese, matching the source they sit in. Protocol notes may quote vendor strings verbatim.
 
 ## Scope
 
