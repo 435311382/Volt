@@ -1,0 +1,32 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  compile:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile with the in-box C# compiler
+        shell: cmd
+        run: build.bat
+
+      - name: Check the binary was produced
+        shell: pwsh
+        run: |
+          if (-not (Test-Path Volt.exe)) {
+            throw "build.bat did not produce Volt.exe"
+          }
+          $f = Get-Item Volt.exe
+          "Volt.exe built: $($f.Length) bytes"
+          "SHA256: $((Get-FileHash Volt.exe -Algorithm SHA256).Hash)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Volt
+          path: Volt.exe
