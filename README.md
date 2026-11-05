@@ -4,21 +4,7 @@
 
 Most wireless peripherals never report battery level to Windows. They speak a vendor-private HID protocol that only the manufacturer's software understands, so the OS shows nothing and generic battery widgets see nothing. Volt talks those protocols directly.
 
-```
-┌─────────────────────────────┐
-│ Volt                     ✕  │
-│                             │
-│  🖱  ATK X1 SE        100 % │
-│     2.4G receiver · in use  │
-│     ━━━━━━━━━━━━━━━━━━━━    │
-│                             │
-│  ⌨  AULA F99           95 % │
-│     2.4G receiver · charging│
-│     ━━━━━━━━━━━━━━━━━━━     │
-│                             │
-│ Updated 18:03:12         ⟳  │
-└─────────────────────────────┘
-```
+<img src="docs/screenshot.png" alt="Volt flyout showing two devices with their battery levels" width="350">
 
 ## Why
 
