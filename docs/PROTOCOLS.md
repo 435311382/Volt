@@ -1,8 +1,10 @@
 # Protocols
 
+<sub>[English](PROTOCOLS.md) · [简体中文](PROTOCOLS.zh-CN.md)</sub>
+
 Everything here was derived by sending frames to real hardware and reading the replies. Where a claim comes from someone else's source, the repository is named.
 
-Both supported devices sit on the **Compx** radio platform. They expose no standard HID battery usage page (`0x06 / 0x20`), so Windows never sees a battery for them. The level is only available through a vendor-private collection with usage page `0xFF02`.
+Both supported devices sit on the **Compx** radio platform, but they do not share a frame layout. They expose no standard HID battery usage page (`0x06 / 0x20`), so Windows never sees a battery for them. The level is only available through a vendor-private collection with usage page `0xFF02`.
 
 ---
 
@@ -48,7 +50,7 @@ The device validates the whole frame, not just the checksum byte. Filling byte `
 
 `[16]` is the checksum of the reply, same formula. Verify it if you like; Volt only checks the `08 04` prefix.
 
-Voltage is only accepted when it falls in 2000–5000 mV, which filters out devices that leave the field zeroed.
+Voltage is only accepted when it falls strictly inside `2000 < mV < 5000` — an open interval, so `2000` and `5000` themselves are rejected. That filters out devices that leave the field zeroed.
 
 ### Interface caveat
 

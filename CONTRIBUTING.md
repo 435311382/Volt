@@ -1,5 +1,7 @@
 # Contributing
 
+<sub>[English](CONTRIBUTING.md) · [简体中文](CONTRIBUTING.zh-CN.md)</sub>
+
 Small project, small process.
 
 ## Reporting a device
@@ -13,6 +15,8 @@ The most useful thing you can send is a new device report. Include:
 
 You can get the first two with any HID enumeration tool. `docs/ADDING-A-DEVICE.md` explains which collection matters and how to read the reply.
 
+The [device report template](.github/ISSUE_TEMPLATE/device-report.md) asks for exactly these fields.
+
 ## Pull requests
 
 - Keep the build dependency-free. Volt compiles with the C# compiler that ships with .NET Framework 4.x — no SDK, no NuGet, no MSBuild.
@@ -24,7 +28,10 @@ You can get the first two with any HID enumeration tool. `docs/ADDING-A-DEVICE.m
 
 - Comments explain why, not what. A comment that restates the next line should be deleted.
 - Hard-won knowledge belongs in a comment next to the code that depends on it — the interface-ordering trap, the sleep behaviour, the checksum that is not a checksum. Those are the parts a reader cannot recover by reading the code alone.
-- Repository text is English. The application interface is Simplified Chinese. Code comments are Chinese, matching the source they sit in. Protocol notes may quote vendor strings verbatim.
+- **Documentation is bilingual.** Every document has an English main file and a `*.zh-CN.md` translation, linked from a language switcher at the top. Change both in the same pull request; a translation that lags behind the English text is a bug.
+- **The application interface and code comments are Simplified Chinese.** The tray menu, the flyout labels and the protocol notes people read while debugging are written in the language the devices' own software is localised into, and the comments match the source they sit in.
+- **Commit messages are English**, one line, imperative mood.
+- Protocol notes may quote vendor strings verbatim.
 
 ## Scope
 

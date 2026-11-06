@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Supported device list
+    url: https://github.com/435311382/Volt#supported-devices
+    about: Check whether your model is already listed before opening a device report. / 开设备上报前先确认型号是否已在列表里。
+  - name: How the protocols work
+    url: https://github.com/435311382/Volt/blob/main/docs/PROTOCOLS.md
+    about: Frame layouts, checksums, and the interface quirks that explain most odd readings. / 帧结构、校验和与多数异常读数的原因。
+  - name: Adding a device yourself
+    url: https://github.com/435311382/Volt/blob/main/docs/ADDING-A-DEVICE.md
+    about: The catalogue entry and protocol handler you would need — a pull request is welcome. / 需要加的目录项和协议处理器，欢迎直接提 PR。

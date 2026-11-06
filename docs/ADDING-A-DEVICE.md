@@ -1,5 +1,7 @@
 # Adding a device
 
+<sub>[English](ADDING-A-DEVICE.md) · [简体中文](ADDING-A-DEVICE.zh-CN.md)</sub>
+
 Volt's catalogue is a list of `DeviceDefinition` objects. Each one names a physical device and lists the HID endpoints it can be reached through.
 
 Adding a model is usually one entry. Adding a protocol family is one `Read` method.
