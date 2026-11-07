@@ -6,7 +6,14 @@ All notable changes to Volt are documented here. Format follows [Keep a Changelo
 
 ## [Unreleased]
 
+### Added
+- `src/Filter.cs`: a decrease-only battery filter, plus 38 unit tests in `test/FilterTests.cs`. Vendor firmware estimates charge from voltage, so the reported level rises whenever the load drops — unplugging the cable, going idle. Microsoft's accessory guidance requires battery level to be a decrease-only attribute, increasing only on a charger or after a battery swap; the filter implements that, with a persisted-drop guard for genuinely bad frames and a five-minute resync so a stale value cannot get stuck.
+- Voltage replies are now verified by checksum instead of prefix alone. Unrelated traffic on the same endpoint can start with `08 04` and put garbage in the percentage byte — 116, 123 and 127 were all observed.
+- AULA replies are matched in both observed shapes: `13 4A 01 00 02` (percentage at 5) and `13 0A 01 00 04 05` (percentage at 6). The second shape was previously treated as silence.
+- `docs/PROTOCOLS.md` gained a "Reading the percentage" section covering the voltage-sag mechanism, the Microsoft rule, and why smoothing is the wrong fix.
+
 ### Changed
+- Polling no longer stops when the flyout is closed. It drops from 5 s to 45 s instead, so the tray icon keeps up to date; 45 s is deliberately above the 30–60 s sleep timer these keyboards use, so the idle poll does not keep the device awake.
 - The README states up front that the project is AI-developed, with a section on what the AI wrote and what a human decided. The repository description says so too.
 - Documentation is now bilingual. Every English document has a `*.zh-CN.md` counterpart; both are kept in sync by the same pull request.
 - Rewrote the platform notes to state plainly that the ATK and AULA frames share a vendor platform but not a layout, and that the ATK voltage field is an open interval.
@@ -40,7 +47,14 @@ All notable changes to Volt are documented here. Format follows [Keep a Changelo
 
 ## [未发布]
 
+### 新增
+- `src/Filter.cs`：只降不升的电量过滤器，另有 `test/FilterTests.cs` 里 38 个单元测试。厂商固件靠电压估算电量，负载一降上报值就往上涨 —— 拔线、闲置都会。微软配件规范要求电量是只降不升的属性，只有接充电器或换过电池才允许上升；过滤器实现这条规则，并附带两道保护：大幅下跌需要持续确认，防止单个坏帧把显示永久锁死；超过五分钟重新同步，防止陈旧值卡住。
+- 电压回包改为校验和验证，不再只看前缀。同一接口上的无关流量可能以 `08 04` 开头，把垃圾值塞进电量字节 —— 实测见过 116、123、127。
+- AULA 回包现在两种形状都认：`13 4A 01 00 02`（电量在下标 5）与 `13 0A 01 00 04 05`（电量在下标 6）。第二种以前会被当成没应答。
+- `docs/PROTOCOLS.md` 新增「电量怎么读」一节，讲电压压降的机理、微软的规则，以及为什么平滑是错的解法。
+
 ### 变更
+- 面板收起后不再停止轮询，而是把间隔从 5 秒放慢到 45 秒，托盘图标因此能保持更新；45 秒刻意高于这类键盘 30–60 秒的休眠计时器，避免空闲轮询把设备一直唤醒。
 - README 开头标注本项目由 AI 开发，并新增一节说明哪些由 AI 编写、哪些由人决定。仓库简介里也写明了。
 - 文档改为双语。每份英文文档都有对应的 `*.zh-CN.md`，并在同一个 Pull Request 里同步维护。
 - 重写平台说明：明确 ATK 与 AULA 共用厂商平台但帧格式不同，并明确 ATK 的电压字段是开区间。

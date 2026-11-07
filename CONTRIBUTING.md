@@ -23,6 +23,7 @@ The [device report template](.github/ISSUE_TEMPLATE/device-report.md) asks for e
 - The source is C# 5. No string interpolation, no null-conditional operator, no `nameof`. The in-box compiler on a clean Windows install does not support them.
 - One device per commit where practical, so the catalogue stays reviewable.
 - Say how you tested it. "Reads 87% on my F99, matches the vendor software" is enough.
+- If you touch `src/Filter.cs`, run `test.bat` and add a case for the behaviour you changed. The filter is the one part where a regression is invisible on screen — the number just drifts the wrong way.
 
 ## Style
 

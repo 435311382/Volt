@@ -24,6 +24,7 @@ Most wireless peripherals never report battery level to Windows. They speak a ve
 - [How it works](#how-it-works)
 - [How it was built](#how-it-was-built)
 - [Build](#build)
+- [Test](#test)
 - [Project layout](#project-layout)
 - [Known limitations](#known-limitations)
 - [Contributing](#contributing)
@@ -37,13 +38,14 @@ Volt is the tool I wanted: two devices, correct names, one row each, live percen
 
 ## Features
 
-- **Tray icon with live level** — colour-coded battery (green above 35%, amber 16–35%, red at 15% or below), refreshed every 5 seconds.
+- **Tray icon with live level** — colour-coded battery (green above 35%, amber 16–35%, red at 15% or below), refreshed every 5 seconds while the flyout is open and every 45 seconds while it is closed.
 - **Click to open a flyout** — one row per device: name, connection type, charging state, percentage, level bar.
 - **One device, one row** — a mouse connected over both its 2.4G dongle and a USB cable still appears once. Volt picks the active connection, preferring the one that is actually charging.
 - **Survives device sleep** — many 2.4G devices stop answering when idle. Volt keeps the last successful reading on disk and shows it as `last 17:52` instead of blanking out.
+- **A level that doesn't jump around** — these devices estimate charge from voltage, so the reading climbs whenever the load drops (unplugging the cable, going idle). Volt treats the level as decrease-only, the way Microsoft's battery guidance requires, so a keyboard that reads 96% unplugged stays at 96% instead of bouncing to 84% and back. See [Reading the percentage](docs/PROTOCOLS.md#reading-the-percentage).
 - **Manual autostart** — Volt writes nothing to the registry and has no autostart switch. To start it at login, add a shortcut to `shell:startup`, or a `REG_SZ` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` pointing at the exe.
 - **Single instance** — re-launching the executable reopens the flyout instead of starting a second copy.
-- **No dependencies** — one self-contained executable, 39,936 bytes (39 KB). No .NET runtime install, no Electron, no installer, no admin rights.
+- **No dependencies** — one self-contained executable, 41,984 bytes (41 KB). No .NET runtime install, no Electron, no installer, no admin rights.
 
 ## Install
 
@@ -83,7 +85,7 @@ Volt is AI-developed. The entire source tree, this README and its Chinese counte
 
 **Decided by a human:** the scope — two devices, no vendor software, no installer, no driver, no elevation. Which features to refuse: lighting control, DPI and macro editing are out of scope by decision, not by oversight. And the hardware verification: plugging the devices in, reading the vendor utility, and comparing its numbers against Volt's.
 
-**What that means for a reader:** the code is small enough to read in an afternoon, but there is no automated test suite. The only verification is one person with two devices on one machine. Exotic hardware is more likely to hit a reply the parser has never seen than to expose a mistake the documentation is hiding. Anything not written down in [docs/PROTOCOLS.md](docs/PROTOCOLS.md) was never confirmed against real hardware — treat it as unverified rather than as fact.
+**What that means for a reader:** the code is small enough to read in an afternoon. The one part that has automated tests is the battery filter — `test/FilterTests.cs`, 38 cases, no framework needed. Everything else is verified by one person with two devices on one machine. Exotic hardware is more likely to hit a reply the parser has never seen than to expose a mistake the documentation is hiding. Anything not written down in [docs/PROTOCOLS.md](docs/PROTOCOLS.md) was never confirmed against real hardware — treat it as unverified rather than as fact.
 
 ## Build
 
@@ -105,25 +107,37 @@ C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe ^
 
 The source is C# 5 — no interpolation, no `?.`, no `nameof` — so it compiles with the in-box compiler on a clean Windows install.
 
+## Test
+
+```bat
+test.bat
+```
+
+Compiles `test/FilterTests.cs` together with `src/Filter.cs` and runs it. The test program is a plain console exe with its own `Main`; it prints each case and exits non-zero on the first failure. No framework, no NuGet.
+
+The 38 cases cover the decrease-only rule: ordinary discharge, a level that rebounds after the cable is pulled, a large jump that is genuinely a charge, out-of-range bytes, a drop that must persist before it is believed, and the resync path for a device that was away for minutes. CI runs this before the release build.
+
 ## Project layout
 
 | Path | Purpose |
 |---|---|
 | `src/HidNative.cs` | SetupAPI enumeration, `hid.dll` caps, overlapped read/write wrapper |
 | `src/Protocols.cs` | Compx frame builders, device catalogue |
+| `src/Filter.cs` | Decrease-only battery filter |
 | `src/Scanner.cs` | Match interfaces to devices, pick one connection, persist last readings |
 | `src/Theme.cs` | Colours, fonts, rounded-rect helpers |
 | `src/TrayIcon.cs` | Runtime icon rendering (multi-size PNG-in-ICO) |
 | `src/MainForm.cs` | Flyout window, device rows, tray wiring |
 | `src/Program.cs` | Entry point, single-instance mutex |
+| `test/FilterTests.cs` | Filter behaviour tests, no framework |
 | `docs/` | Protocol notes and the device-adding walkthrough |
-| `.github/workflows/build.yml` | CI: compiles with the in-box C# compiler on `windows-latest` |
+| `.github/workflows/build.yml` | CI: runs the tests, then compiles on `windows-latest` |
 
 ## Known limitations
 
 - Windows only. The HID layer is Win32.
 - Two devices are hard-coded in the catalogue. Other Compx devices need their VID/PID added.
-- Polling every 5 seconds resets the device idle timer, which costs a little battery. Raise the interval in `MainForm` if that matters to you.
+- Polling resets the device idle timer, which costs a little battery. The closed-flyout interval is 45 seconds for that reason; raise it in `MainForm` if it still matters.
 - Two battery tools running at once will fight over the same HID handle. Close the vendor software.
 
 ## Contributing

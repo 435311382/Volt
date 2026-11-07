@@ -48,7 +48,9 @@ The device validates the whole frame, not just the checksum byte. Filling byte `
               └──────── [6]    percentage, 0..100
 ```
 
-`[16]` is the checksum of the reply, same formula. Verify it if you like; Volt only checks the `08 04` prefix.
+`[16]` is the checksum of the reply, same formula. **Volt verifies it**: a reply is accepted only when all 17 bytes sum to `0x55` modulo 256, not merely when the first two bytes are `08 04`.
+
+That second check matters more than it looks. The interface also carries unrelated traffic, and a frame that happens to start with `08 04` but is not a battery reply will yield garbage in `[6]` — observed values include 116, 123 and 127. Checking the checksum drops those before they reach the parser.
 
 Voltage is only accepted when it falls strictly inside `2000 < mV < 5000` — an open interval, so `2000` and `5000` themselves are rejected. That filters out devices that leave the field zeroed.
 
@@ -82,6 +84,18 @@ Used by the AULA F99 over its 2.4G dongle (`3554:FA09`). The collection is `FF02
     └────────────── [0..4] fixed prefix
 ```
 
+There is a **second reply shape** on the same endpoint:
+
+```
+13 0A 01 00 04 05 60 10 00 00 00 00 00 00 00 00 00 00 00 97
+^^^^^^^^^^^^^^^^^ ^^ ^^
+       |           |  └── [7] status, same encoding
+       |           └───── [6] percentage  (0x60 = 96)
+       └───────────────── [0..5] fixed prefix
+```
+
+Both were observed from the same keyboard within seconds of each other. The `13 0A` shape is what a `13 05 01` query returns — that is the sub-command used by [2.4g-battery-tray-python](https://github.com/ahutsunboy/2.4g-battery-tray-python), which reads the percentage from index 6. So the endpoint answers at least two different commands with two different layouts, and a parser that only knows `13 4A` will treat every `13 0A` reply as silence. Volt matches both prefixes and reads the percentage from the offset that belongs to each.
+
 The same command is used by other AULA models and by LEOBOG keyboards on the same VID. Third-party projects ([AulaTray](https://github.com/brhnshn/AulaTray), [AulaMonitor](https://github.com/Makkksx/AulaMonitor)) agree on `0xFF02` / `0x13 0x4A`.
 
 ### Interface caveat
@@ -99,7 +113,27 @@ Neither device pushes unsolicited reports. Both must be polled, and both go quie
 
 Because the failure mode is a timeout rather than an error, Volt keeps the last good reading and labels it `last HH:mm`. A stale value beats a blank row.
 
-Note that polling resets the device idle timer, which costs battery. Five seconds is a reasonable compromise; a longer interval is friendlier to the pack.
+Note that polling resets the device idle timer, which costs battery. Volt polls every 5 seconds while the flyout is open and every 45 seconds while it is closed; the slower idle rate is deliberately above the 30–60 s sleep timer most of these keyboards use, so the poll does not keep waking the device.
+
+---
+
+## Reading the percentage
+
+Raw percentage bytes are noisier than they look, and the fix is not to smooth them.
+
+A lithium cell's terminal voltage sags under load and recovers when the load goes away. Any device that estimates charge from voltage — which is what these peripherals do — will therefore report a *higher* level the moment you stop using it, or the moment you unplug the charging cable. That is the mechanism behind a keyboard reading 96%, dropping to 84% when unplugged, and climbing back to 96%.
+
+Microsoft's Bluetooth accessory guidance settles the question: battery level is a **decrease-only** attribute. It may only increase when the device is on a charger, or when the battery was physically removed and reinstalled. The same document gives the exact scenario — a mouse measuring 5%, entering a low-power state, and measuring 10% because the load dropped — and states the reported value must stay at 5%.
+
+Volt implements that rule in `src/Filter.cs`, plus three guards:
+
+- **Bad values are dropped.** `[6]` outside 1..100 is discarded rather than clamped.
+- **Large drops must persist.** A single bad frame would otherwise pin the display forever, since the value is now allowed to fall but not to rise. A drop of more than one point is accepted only after it has stayed below the previous value for 10 seconds across at least two readings. A one-point drop is accepted immediately, because that is ordinary discharge.
+- **Long gaps resync.** If more than 5 minutes passed between readings — sleep, hibernation, program start — the new value is taken as-is. The alternative is a stale number that can never climb back.
+
+Changing the connection (dongle ↔ cable) also resyncs, for the same reason Microsoft allows an increase after a battery swap: everything that happened in between is unobserved.
+
+Why not an average, a median filter, or a Kalman filter? Because the noise here is not measurement noise around a true value; it is a systematic bias that appears and disappears with load. Smoothing it produces a number that lags reality and still moves in the wrong direction. The decrease-only rule removes the wrong-direction movement at the source, and leaves the genuine discharge curve intact.
 
 ---
 
