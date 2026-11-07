@@ -44,6 +44,16 @@ namespace Volt
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Volt", "last-readings.tsv");
 
+        // 每台设备一个过滤器。固件报出来的电量会在相邻几个百分点之间来回抖，
+        // 直接显示就是「90 → 80 → 90」。过滤器把这种毛刺压掉，只放行真实变化。
+        private static readonly Dictionary<string, BatteryFilter> _filters = new Dictionary<string, BatteryFilter>();
+
+        // 上次成功采样的时间。用来判断两次读数之间隔了多久。
+        private static readonly Dictionary<string, DateTime> _lastSample = new Dictionary<string, DateTime>();
+
+        // 本次运行里见过哪些设备。用来识别「设备从无到有」这种重新出现的情况。
+        private static readonly Dictionary<string, bool> _seen = new Dictionary<string, bool>();
+
         private static bool _loaded = false;
 
         /// <summary>
@@ -157,6 +167,35 @@ namespace Volt
                         }
                     }
 
+                    // 过滤：显示值只走过滤器，原始值留在 RawPercent 里备查。
+                    // 间隔也一起喂进去——窗口收起时轮询会变慢，间隔太久的两次读数
+                    // 之间完全可能真的充过电，这时候不该按「毛刺」压掉。
+                    BatteryFilter filter = GetFilter(def.Key);
+
+                    // 换了连接方式（接收器 ↔ 有线），或者这台设备刚从「未连接」回来，
+                    // 等同于电池被取下来重装：中间发生了什么我们一无所知，
+                    // 直接以当前读数为新起点，否则旧值会一直压着显示不动。
+                    bool rebased = false;
+                    string prevTransport;
+                    if (_cacheTransport.TryGetValue(def.Key, out prevTransport)
+                        && prevTransport != transports[pick])
+                    {
+                        rebased = true;
+                    }
+                    if (!_seen.ContainsKey(def.Key)) rebased = true;
+                    _seen[def.Key] = true;
+
+                    long elapsed = 0;
+                    DateTime lastTick;
+                    if (_lastSample.TryGetValue(def.Key, out lastTick))
+                    {
+                        elapsed = (long)(DateTime.Now - lastTick).TotalMilliseconds;
+                    }
+                    _lastSample[def.Key] = DateTime.Now;
+
+                    if (rebased) filter.Resync(okReadings[pick].RawPercent);
+                    okReadings[pick].Percent = filter.Apply(okReadings[pick].RawPercent, okReadings[pick].Charge, elapsed);
+
                     st.Present = true;
                     st.Transport = transports[pick];
                     st.Reading = okReadings[pick];
@@ -207,6 +246,23 @@ namespace Volt
                 if (ep.Matches(all[i])) return all[i];
             }
             return null;
+        }
+
+        /// <summary>
+        /// 取某台设备的过滤器。第一次用时用缓存里的上次读数做初值——
+        /// 否则程序一启动，第一次读到的毛刺会被当成「初始值」直接显示。
+        /// </summary>
+        private static BatteryFilter GetFilter(string key)
+        {
+            BatteryFilter f;
+            if (_filters.TryGetValue(key, out f)) return f;
+
+            int seed = -1;
+            BatteryReading cached;
+            if (_cache.TryGetValue(key, out cached) && cached != null) seed = cached.Percent;
+            f = new BatteryFilter(seed);
+            _filters[key] = f;
+            return f;
         }
     }
 }

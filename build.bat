@@ -12,7 +12,7 @@ echo Building Volt.exe ...
 "%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ ^
     /win32icon:app.ico /out:Volt.exe ^
     /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll ^
-    src\HidNative.cs src\Protocols.cs src\Scanner.cs src\Theme.cs ^
+    src\HidNative.cs src\Protocols.cs src\Filter.cs src\Scanner.cs src\Theme.cs ^
     src\TrayIcon.cs src\MainForm.cs src\Program.cs
 
 if errorlevel 1 (

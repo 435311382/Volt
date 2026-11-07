@@ -15,6 +15,10 @@ namespace Volt
     /// <summary>一次读取的结果。</summary>
     public sealed class BatteryReading
     {
+        /// <summary>固件原样报出来的电量，未经过滤，可能超出 0..100。</summary>
+        public int RawPercent = -1;
+
+        /// <summary>要显示的电量。由 Scanner 过滤后写入。</summary>
         public int Percent = -1;
         public ChargeState Charge = ChargeState.Unknown;
         public int VoltageMv = -1;
@@ -117,9 +121,18 @@ namespace Volt
     /// </summary>
     public static class AtkCompx
     {
+        /// <summary>
+        /// 认一帧 ATK 应答。光看前两字节不够：同一个接口上还可能有
+        /// 别的报告混进来，把它们的第 6 字节当电量就会读出 116、123 这种值。
+        /// 整帧 17 字节的和必须等于 0x55，这一条能挡掉所有杂帧。
+        /// </summary>
         private static bool IsAtkReply(byte[] got)
         {
-            return got != null && got.Length >= 10 && got[0] == 0x08 && got[1] == 0x04;
+            if (got == null || got.Length < 17) return false;
+            if (got[0] != 0x08 || got[1] != 0x04) return false;
+            int sum = 0;
+            for (int i = 0; i < 17; i++) sum += got[i];
+            return (sum & 0xFF) == 0x55;
         }
         public static BatteryReading Read(HidInterface iface)
         {
@@ -159,6 +172,7 @@ namespace Volt
             }
 
             r.Percent = resp[6];
+            r.RawPercent = resp[6];
             int chargeByte = resp[7];
             if (chargeByte == 1) r.Charge = ChargeState.Charging;
             else r.Charge = ChargeState.Discharging;
@@ -170,8 +184,10 @@ namespace Volt
             }
 
             if (r.Percent == 100 && r.Charge == ChargeState.Charging) r.Charge = ChargeState.Full;
-            r.Ok = r.Percent >= 0 && r.Percent <= 100;
-            if (!r.Ok) r.Percent = -1;
+            // 帧本身解析成功就算 Ok。电量是否在 0..100 由过滤器判断，
+            // 因为固件偶尔会报出 116、123 这种超范围值，那是它自己的测量问题，
+            // 不代表这一帧没读到。
+            r.Ok = true;
             return r;
         }
     }
@@ -179,12 +195,16 @@ namespace Volt
     /// <summary>
     /// 狼蛛 / AULA 20 字节帧（Report ID 0x13）。
     /// 请求：13 CA 后补零，末字节 = sum8(前 19 字节)。
-    /// 响应：13 4A 01 00 02 &lt;电量&gt; &lt;状态&gt; ...
+    ///
+    /// 接收器会回两种格式，两种都得认，否则其中一种会被当成没应答：
+    ///   13 4A 01 00 02 &lt;电量&gt; &lt;状态&gt; ...   电量在 [5]
+    ///   13 0A 01 00 04 05 &lt;电量&gt; &lt;状态&gt; ...  电量在 [6]
     /// 状态 0x10 = 充电中，0x01 = 未充电。
     /// </summary>
     public static class Aula24G
     {
-        private static readonly byte[] Prefix = new byte[] { 0x13, 0x4A, 0x01, 0x00, 0x02 };
+        private static readonly byte[] Prefix4A = new byte[] { 0x13, 0x4A, 0x01, 0x00, 0x02 };
+        private static readonly byte[] Prefix0A = new byte[] { 0x13, 0x0A, 0x01, 0x00, 0x04, 0x05 };
 
         public static BatteryReading Read(HidInterface iface)
         {
@@ -212,23 +232,34 @@ namespace Volt
                 return r;
             }
 
-            r.Percent = resp[5];
-            int status = resp[6];
+            int pctOffset;
+            int statusOffset;
+            if (StartsWith(resp, Prefix4A)) { pctOffset = 5; statusOffset = 6; }
+            else { pctOffset = 6; statusOffset = 7; }
+
+            r.RawPercent = resp[pctOffset];
+            r.Percent = resp[pctOffset];
+            int status = resp[statusOffset];
             if (status == 0x10) r.Charge = ChargeState.Charging;
             else if (status == 0x01) r.Charge = ChargeState.Discharging;
             else r.Charge = ChargeState.Unknown;
 
             if (r.Percent == 100 && r.Charge == ChargeState.Charging) r.Charge = ChargeState.Full;
-            r.Ok = r.Percent >= 0 && r.Percent <= 100;
-            if (!r.Ok) r.Percent = -1;
+            // 同上：解析成功就算 Ok，电量范围交给过滤器判断
+            r.Ok = true;
             return r;
         }
 
         private static bool Matches(byte[] resp)
         {
-            if (resp == null || resp.Length < Prefix.Length + 2) return false;
-            for (int i = 0; i < Prefix.Length; i++)
-                if (resp[i] != Prefix[i]) return false;
+            return StartsWith(resp, Prefix4A) || StartsWith(resp, Prefix0A);
+        }
+
+        private static bool StartsWith(byte[] resp, byte[] prefix)
+        {
+            if (resp == null || resp.Length < prefix.Length + 2) return false;
+            for (int i = 0; i < prefix.Length; i++)
+                if (resp[i] != prefix[i]) return false;
             return true;
         }
     }

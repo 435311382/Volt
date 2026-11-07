@@ -1,4 +1,5 @@
 Volt.exe
+FilterTests.exe
 *.obj
 *.pdb
 .vs/

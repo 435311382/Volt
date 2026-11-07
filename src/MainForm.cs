@@ -8,7 +8,8 @@ using System.Windows.Forms;
 namespace Volt
 {
     /// <summary>
-    /// 托盘图标点开的小浮窗：点托盘图标弹出，点外面自动收起，不进任务栏。
+    /// 托盘图标点开的小浮窗。行为和 Twinkle Tray 一致：
+    /// 点托盘图标弹出，点外面自动收起，不进任务栏。
     /// </summary>
     public sealed class MainForm : Form
     {
@@ -18,6 +19,10 @@ namespace Volt
         private const int TitleH = 42;
         private const int RowH = 66;
         private const int FooterH = 40;
+
+        // 面板开着时勤快一点，收起后放慢——见构造函数里的说明。
+        private const int VisibleIntervalMs = 5000;
+        private const int HiddenIntervalMs = 45000;
 
         private readonly List<DeviceDefinition> _catalog;
         private readonly List<DeviceRow> _rows = new List<DeviceRow>();
@@ -74,8 +79,19 @@ namespace Volt
             BuildLayout();
             BuildTray();
 
-            _timer.Interval = 5000;
-            _timer.Tick += delegate { if (Visible) RefreshNow(); };
+            // 两档轮询：窗口开着时 5 秒一次，收起后 45 秒一次。
+            //
+            // 收起时也要继续采样，否则托盘上的数字会一直停在最后一次打开面板时的值。
+            // 但间隔不能太短——每一次查询都是往接收器发一包 HID 数据，
+            // 而设备自己的休眠计时器会被这次通信重置。查得太勤，键盘就永远睡不下去，
+            // 反而更耗电。45 秒这个值来自 AulaMonitor 的默认轮询间隔，
+            // 它刻意定在典型 30–60 秒休眠计时器之上。
+            _timer.Interval = Visible ? VisibleIntervalMs : HiddenIntervalMs;
+            _timer.Tick += delegate
+            {
+                _timer.Interval = Visible ? VisibleIntervalMs : HiddenIntervalMs;
+                RefreshNow();
+            };
             _timer.Start();
         }
 
@@ -109,6 +125,7 @@ namespace Volt
         {
             base.OnShown(e);
             PositionFlyout();
+            _timer.Interval = VisibleIntervalMs;
             RefreshNow();
         }
 
@@ -242,7 +259,7 @@ namespace Volt
         // ================================================================
 
         // 浮窗刻意不可拖动：它是贴在任务栏上方的弹出面板，
-        // 位置由 PositionFlyout() 决定。
+        // 位置由 PositionFlyout() 决定，和 Twinkle Tray 一致。
         // 之前用 HTCAPTION 让标题栏可拖动，结果一点就飘走，很难用。
 
         private const int WM_ERASEBKGND = 0x0014;
@@ -312,6 +329,7 @@ namespace Volt
         {
             _lastHidden = DateTime.UtcNow;
             Hide();
+            _timer.Interval = HiddenIntervalMs;
         }
 
         public void ShowFlyout()
@@ -319,6 +337,7 @@ namespace Volt
             PositionFlyout();
             Show();
             Activate();
+            _timer.Interval = VisibleIntervalMs;
             RefreshNow();
         }
 
