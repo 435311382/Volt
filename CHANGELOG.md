@@ -4,7 +4,7 @@
 
 All notable changes to Volt are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.0] - 2026-11-08
 
 ### Added
 - `src/Filter.cs`: a decrease-only battery filter, plus 38 unit tests in `test/FilterTests.cs`. Vendor firmware estimates charge from voltage, so the reported level rises whenever the load drops — unplugging the cable, going idle. Microsoft's accessory guidance requires battery level to be a decrease-only attribute, increasing only on a charger or after a battery swap; the filter implements that, with a persisted-drop guard for genuinely bad frames and a five-minute resync so a stale value cannot get stuck.
@@ -45,7 +45,7 @@ All notable changes to Volt are documented here. Format follows [Keep a Changelo
 
 本文件记录 Volt 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [1.1.0] - 2026-11-08
 
 ### 新增
 - `src/Filter.cs`：只降不升的电量过滤器，另有 `test/FilterTests.cs` 里 38 个单元测试。厂商固件靠电压估算电量，负载一降上报值就往上涨 —— 拔线、闲置都会。微软配件规范要求电量是只降不升的属性，只有接充电器或换过电池才允许上升；过滤器实现这条规则，并附带两道保护：大幅下跌需要持续确认，防止单个坏帧把显示永久锁死；超过五分钟重新同步，防止陈旧值卡住。
