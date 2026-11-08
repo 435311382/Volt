@@ -102,6 +102,18 @@ namespace Volt
         [DllImport("hid.dll", CharSet = CharSet.Unicode)]
         private static extern bool HidD_GetSerialNumberString(IntPtr h, StringBuilder b, uint len);
 
+        [DllImport("hid.dll")]
+        private static extern bool HidD_SetFeature(IntPtr h, byte[] buffer, uint len);
+
+        [DllImport("hid.dll")]
+        private static extern bool HidD_GetFeature(IntPtr h, byte[] buffer, uint len);
+
+        [DllImport("hid.dll")]
+        private static extern bool HidD_SetOutputReport(IntPtr h, byte[] buffer, uint len);
+
+        [DllImport("hid.dll")]
+        private static extern bool HidD_GetInputReport(IntPtr h, byte[] buffer, uint len);
+
         [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr SetupDiGetClassDevs(ref Guid g, IntPtr enumerator, IntPtr hwnd, uint flags);
 
@@ -377,6 +389,112 @@ namespace Volt
                 byte[] result = new byte[got];
                 Array.Copy(buf, result, (int)got);
                 return result;
+            }
+
+            /// <summary>只发一个 Output 报告，不等应答。</summary>
+            public bool Write(byte[] request)
+            {
+                lock (_gate)
+                {
+                    if (!IsOpen) return false;
+
+                    System.Threading.NativeOverlapped ov = new System.Threading.NativeOverlapped();
+                    ResetEvent(_ev);
+                    ov.EventHandle = _ev;
+                    uint written = 0;
+                    bool ok = WriteFile(_h, request, (uint)request.Length, out written, ref ov);
+                    if (!ok)
+                    {
+                        int err = Marshal.GetLastWin32Error();
+                        if (err != ERROR_IO_PENDING)
+                        {
+                            LastError = err;
+                            return false;
+                        }
+                        if (WaitForSingleObject(_ev, 400) != 0)
+                        {
+                            CancelIo(_h);
+                            LastError = -1;
+                            return false;
+                        }
+                        if (!GetOverlappedResult(_h, ref ov, out written, false))
+                        {
+                            LastError = Marshal.GetLastWin32Error();
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+            }
+
+            /// <summary>
+            /// 发一个 Feature 报告。长度必须等于该接口的 FeatureReportByteLength，
+            /// 否则 hid.dll 直接返回失败（err 87）。
+            /// </summary>
+            public bool SetFeature(byte[] buffer)
+            {
+                lock (_gate)
+                {
+                    if (!IsOpen) return false;
+                    if (!HidD_SetFeature(_h, buffer, (uint)buffer.Length))
+                    {
+                        LastError = Marshal.GetLastWin32Error();
+                        return false;
+                    }
+                    return true;
+                }
+            }
+
+            /// <summary>
+            /// 取一个 Feature 报告。读之前必须先把 buffer 的第 0 字节设成报告 ID，
+            /// 返回的报告会覆盖整个 buffer。
+            /// </summary>
+            public bool GetFeature(byte[] buffer)
+            {
+                lock (_gate)
+                {
+                    if (!IsOpen) return false;
+                    if (!HidD_GetFeature(_h, buffer, (uint)buffer.Length))
+                    {
+                        LastError = Marshal.GetLastWin32Error();
+                        return false;
+                    }
+                    return true;
+                }
+            }
+
+            /// <summary>
+            /// 用 IOCTL 形式的 Output 报告发数据。有些设备不收 WriteFile 的
+            /// interrupt OUT，只认这条路（或者反过来）。
+            /// </summary>
+            public bool SetOutputReport(byte[] buffer)
+            {
+                lock (_gate)
+                {
+                    if (!IsOpen) return false;
+                    if (!HidD_SetOutputReport(_h, buffer, (uint)buffer.Length))
+                    {
+                        LastError = Marshal.GetLastWin32Error();
+                        return false;
+                    }
+                    return true;
+                }
+            }
+
+            /// <summary>用 IOCTL 形式取 Input 报告，不等设备主动推。</summary>
+            public byte[] GetInputReport(int readLength)
+            {
+                lock (_gate)
+                {
+                    if (!IsOpen) return null;
+                    byte[] buffer = new byte[readLength];
+                    if (!HidD_GetInputReport(_h, buffer, (uint)readLength))
+                    {
+                        LastError = Marshal.GetLastWin32Error();
+                        return null;
+                    }
+                    return buffer;
+                }
             }
 
             /// <summary>立刻关闭句柄。关闭会取消所有未完成的 I/O，避免残留读取抢走下一次应答。</summary>

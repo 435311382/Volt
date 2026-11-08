@@ -14,7 +14,8 @@ if not exist "%CSC%" (
 echo Building FilterTests.exe ...
 "%CSC%" /nologo /target:exe /platform:anycpu /out:FilterTests.exe ^
     /r:System.dll ^
-    src\HidNative.cs src\Filter.cs src\Protocols.cs test\FilterTests.cs
+    src\HidNative.cs src\Protocols.cs src\ProtocolsVendor.cs src\DeviceTable.cs ^
+    src\Filter.cs test\FilterTests.cs
 
 if errorlevel 1 (
     echo Build failed.

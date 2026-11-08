@@ -43,9 +43,10 @@ Volt is the tool I wanted: two devices, correct names, one row each, live percen
 - **One device, one row** — a mouse connected over both its 2.4G dongle and a USB cable still appears once. Volt picks the active connection, preferring the one that is actually charging.
 - **Survives device sleep** — many 2.4G devices stop answering when idle. Volt keeps the last successful reading on disk and shows it as `last 17:52` instead of blanking out.
 - **A level that doesn't jump around** — these devices estimate charge from voltage, so the reading climbs whenever the load drops (unplugging the cable, going idle). Volt treats the level as decrease-only, the way Microsoft's battery guidance requires, so a keyboard that reads 96% unplugged stays at 96% instead of bouncing to 84% and back. See [Reading the percentage](docs/PROTOCOLS.md#reading-the-percentage).
+- **137 models across 28 vendors** — mice, keyboards, headsets, controllers and the receivers themselves, over 2.4G, Bluetooth and cable. See [Supported devices](#supported-devices).
+- **Left, right and case** — a true-wireless headset is three separate batteries. Where the dongle exposes them (Sony INZONE Buds is the one that does), Volt shows all three instead of collapsing them to the lowest.
 - **Manual autostart** — Volt writes nothing to the registry and has no autostart switch. To start it at login, add a shortcut to `shell:startup`, or a `REG_SZ` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` pointing at the exe.
 - **Single instance** — re-launching the executable reopens the flyout instead of starting a second copy.
-- **No dependencies** — one self-contained executable, 41,984 bytes (41 KB). No .NET runtime install, no Electron, no installer, no admin rights.
 
 ## Install
 
@@ -59,19 +60,34 @@ To start with Windows, add a shortcut to the startup folder, or add a `REG_SZ` v
 
 ## Supported devices
 
-| Device | Connection | VID:PID | HID endpoint | Report |
-|---|---|---|---|---|
-| ATK X1 SE | 2.4G dongle | `373B:10C9` | `FF02/0002` | 17 bytes |
-| ATK X1 SE | USB cable / Nearlink | `373B:1107` | `FF02/0002` | 17 bytes |
-| AULA F99 | 2.4G dongle | `3554:FA09` | `FF02/0002` | 20 bytes |
+**137 models, 28 vendors, 217 wireless PIDs and 58 wired PIDs.** Full table: [docs/DEVICES.md](docs/DEVICES.md).
 
-The two ATK rows are two transports of the same mouse — it shows up once in the flyout, not twice.
+| Vendor | Models | Notable families |
+|---|---|---|
+| Razer | 46 | Viper, DeathAdder, Basilisk, Naga, Cobra, BlackWidow, BlackShark |
+| Logitech | 16 | Lightspeed, Bolt, Unifying, Nano receivers, G PRO, Zone |
+| SteelSeries | 12 | Arctis 1/7/9, Nova 3/5/7/7P, Nova Pro, GameBuds |
+| HyperX | 10 | Cloud II, Cloud III, Cloud Flight, Cloud Alpha |
+| Sony | 6 | INZONE Buds / H5 / H9 II, PULSE 3D, DualSense, DualShock 4 |
+| VXE | 5 | MAD R, MAD R Major Plus, R1 Pro Max, R1 SE+ |
+| Corsair | 4 | Virtuoso XT / SE, Void, Void V2 |
+| MCHOSE | 4 | L7 Pro, K7 Ultra, X9, V9 Pro |
+| ATK | 4 | X1 SE, F1 Ultimate, A9 Ultimate, Zero |
+| AULA | 4 | F68, F75, F87, F99 (and the LEOBOG keyboards sharing the same dongle) |
+| Others | 26 | Jabra, Lamzu, Audeze, Dareu, VGN, ASUS ROG, Lenovo, Plantronics, Ninjutso, Attack Shark, Bloody, Flydigi, G-Wolves, Scyrox, Zaopin, Baseus, NINX, ASTRO |
 
-Both devices expose a vendor-private collection on usage page `0xFF02`, but they do not speak the same frame. The ATK frame is the 17-byte **Compx** layout, shared by a large family of Chinese peripherals: ATK, VXE, VGN and others. The AULA frame is a 20-byte layout shared by other AULA and LEOBOG models. Adding a model usually means adding one `Endpoint` with its VID/PID — see [Adding a device](docs/ADDING-A-DEVICE.md).
+The table is keyed on VID:PID. A model that exposes the same device over both a dongle and a cable is one row in the flyout, not two: Volt picks the active transport, preferring the one that is actually charging.
+
+Devices fall into two broad groups:
+
+- **Vendor-private protocols** — a report on a vendor usage page (`0xFF02`, `0xFF05`, `0xFF42`, `0xFF90`, `0xFF00` and others). Each family needs its own frame format, checksum and byte offsets. The Compx 17-byte frame alone covers ATK, VXE, VGN, Dareu and G-Wolves.
+- **Standard HID battery** — usage page `0x0006` / usage `0x0020`. Any device that implements it works without being listed at all.
+
+Adding a model is usually one line in `src/DeviceTable.cs`; adding a protocol family is one class in `src/ProtocolsVendor.cs`. See [Adding a device](docs/ADDING-A-DEVICE.md).
 
 ## How it works
 
-Volt enumerates HID collections through SetupAPI, matches them against a small catalogue of known devices, and sends each one a vendor-private report over overlapped I/O. The reply carries the battery percentage, a charging flag, and often a pack voltage.
+Volt enumerates HID collections through SetupAPI, groups them by VID:PID, matches each group against the model table, then hands the group to the first protocol that claims it. That protocol sends a vendor-private report over overlapped I/O (or a feature report, or just waits for the dongle to push one). The reply carries the battery percentage, a charging flag, and often a pack voltage.
 
 Nothing is injected into Explorer, no driver is installed, and no vendor software is required.
 
@@ -121,24 +137,28 @@ The 38 cases cover the decrease-only rule: ordinary discharge, a level that rebo
 
 | Path | Purpose |
 |---|---|
-| `src/HidNative.cs` | SetupAPI enumeration, `hid.dll` caps, overlapped read/write wrapper |
-| `src/Protocols.cs` | Compx frame builders, device catalogue |
+| `src/HidNative.cs` | SetupAPI enumeration, `hid.dll` caps, overlapped read/write/feature wrapper |
+| `src/Protocols.cs` | Shared plumbing: `BatteryReading`, `HidGroup`, `BatteryProtocol`, `HidQuery` |
+| `src/ProtocolsVendor.cs` | 23 vendor protocols plus a standard-HID fallback, one class each |
+| `src/DeviceTable.cs` | 137-model table, vendor names, user name overrides |
 | `src/Filter.cs` | Decrease-only battery filter |
-| `src/Scanner.cs` | Match interfaces to devices, pick one connection, persist last readings |
+| `src/Scanner.cs` | Group interfaces by VID:PID, pick one connection, persist last readings |
 | `src/Theme.cs` | Colours, fonts, rounded-rect helpers |
 | `src/TrayIcon.cs` | Runtime icon rendering (multi-size PNG-in-ICO) |
 | `src/MainForm.cs` | Flyout window, device rows, tray wiring |
 | `src/Program.cs` | Entry point, single-instance mutex |
 | `test/FilterTests.cs` | Filter behaviour tests, no framework |
-| `docs/` | Protocol notes and the device-adding walkthrough |
+| `tools/` | `docs/DEVICES.md` generator, run after changing the model table |
+| `docs/` | Protocol notes, device list, device-adding walkthrough |
 | `.github/workflows/build.yml` | CI: runs the tests, then compiles on `windows-latest` |
 
 ## Known limitations
 
 - Windows only. The HID layer is Win32.
-- Two devices are hard-coded in the catalogue. Other Compx devices need their VID/PID added.
+- **2.4G audio dongles generally do not report battery.** Most headsets expose charge only over Bluetooth (BLE GATT or vendor broadcasts), not over the USB dongle. Volt lists them and says so rather than showing a fake number. The Baseus AeQur G10 is one: its report IDs `0x55` / `0x41` are firmware-upgrade triggers, not telemetry — writing to them can switch the dongle into bootloader mode.
 - Polling resets the device idle timer, which costs a little battery. The closed-flyout interval is 45 seconds for that reason; raise it in `MainForm` if it still matters.
 - Two battery tools running at once will fight over the same HID handle. Close the vendor software.
+- Protocols were ported from open-source projects and documentation, not verified against every listed model. Volt only claims to read the families it ships code for; individual models in the table are best-effort. Unverified models are marked in [docs/DEVICES.md](docs/DEVICES.md).
 
 ## Contributing
 

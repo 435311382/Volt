@@ -104,6 +104,48 @@ This HID path intermittently disappears between reads — open succeeds, then th
 
 ---
 
+## Headsets
+
+Headsets do not share one protocol the way the Compx mice do. Each vendor has its own frame, and several of them speak over **feature reports** rather than output reports — which is a different code path in `hid.dll` and is why `HidNative.Handle` grew `SetFeature` / `GetFeature`.
+
+All of the formats below were ported from [Sapd/HeadsetControl](https://github.com/Sapd/HeadsetControl) (`lib/devices/*.hpp`). None of them has been exercised against the physical device on this machine; they are implemented, not verified.
+
+| Family | Transport | Request | Percentage at | Notes |
+|---|---|---|---|---|
+| Sony INZONE Buds | push only | none | `[16]` left, `[14]` right, `[18]` case | accepts a frame when `[1]==0x12 && [2]==0x04`; `[19]` must equal `(left + right + 117) & 0xFF` |
+| Audeze Maxwell | push | `06 05 5A 05 D6 0C` | `[8]` | reply marker `0x05`, type `0x5D` |
+| Corsair Virtuoso XT / SE | push | 64 bytes, report `0x02`, target `0x09` then `0x08`, property `0x0F` | `[7..4]` little-endian, ÷10 | property `0x10` is the charge state, `1` = charging |
+| Corsair Void | output | `C9 64` | `[2] & 0x7F` | bit 7 of `[2]` is a mic-up flag; `[4]` is the charge state |
+| Jabra (GNP) | push | 64 bytes, report `0x05`, cmd `0x12`, sub `0x02` | `[8]` | `[4] >> 6` must be `0x03` (response); `[7] & 0x01` is charging |
+| Lenovo Wireless VoIP | feature | `24 01` | `[7]` | reply ID `0x27` |
+| Plantronics BT600 | push | 64 bytes, report `0x07`, `02 0A 1A` at `[8..10]` | `[11] × 100 ÷ ([12] − 1)` | `[13]` is charging; `[12] < 2` means a malformed reply |
+| MCHOSE X9 / V9 Pro | output | `55 65 01` | `[2]` | reply must have `[3]==0x02`; lives on usage page `0xFF90` |
+| SteelSeries legacy (Arctis 1/7/9, Pro) | push | 31-byte packet, command per model | mapped from a per-model range | each model has its own command, byte offset, offline value and 0–4 vs 0–100 scale |
+| SteelSeries Nova (Arctis 7+, Nova 3/5/7/7P/Pro, GameBuds) | push | `00 20` | `[2]` | `[3]` is `0` offline, `1`/`2` charging; six older PIDs report 0–4 instead of 0–100 |
+
+### Three batteries, one device
+
+A true-wireless headset is not one battery. It is three: left bud, right bud, charging case. Every open-source implementation reviewed here collapses that to a single number — HeadsetControl's Sony driver parses all three bytes and then returns `std::min(left, right)`, discarding the case.
+
+`BatteryReading` therefore carries `LeftPercent`, `RightPercent` and `CasePercent` alongside `Percent`, and the flyout shows `L 88% R 87% C 100%` when more than one is present. Only the Sony INZONE Buds driver populates all three today, because it is the only 2.4G dongle in the reviewed set that actually transmits them.
+
+### Why most 2.4G audio dongles show nothing
+
+A headset dongle is an audio endpoint first. The vendor usually keeps battery telemetry on the **Bluetooth** side (BLE GATT, or a vendor advertisement payload) and never exposes it over USB HID.
+
+The Baseus AeQur G10 (`10D6:4801`) is the worked example. It exposes two vendor collections, `FF90/0001` with report ID `0x55` and `FF82/0001` with report ID `0x41`, and both look like plausible telemetry channels. They are not:
+
+- `0x55` and `0x41` are **Actions ADFU bootloader entry triggers**. Writing an output report to either one puts the dongle into firmware-upgrade mode until it is physically replugged.
+- `0x06` and `0x07` are Consumer Control (volume) and Telephony (mute LED).
+
+Forty-eight combinations of a JieLi-style TLV query across those channels produced zero replies, which is consistent with there being nothing to reply. Volt lists the device and writes "2.4G receiver does not report battery" rather than inventing a number.
+
+Source: [`ryan-mant/AreYouLowBattery`](https://github.com/ryan-mant/AreYouLowBattery), `areyoulowbattery/handlers/actions.py`, whose header documents the same finding for `10d6:4802`.
+
+**Do not write to `0x55` or `0x41` on an Actions-based dongle.** Reading is harmless; writing can leave the device unusable until it is unplugged.
+
+---
+
 ## Sleep behaviour
 
 Neither device pushes unsolicited reports. Both must be polled, and both go quiet when idle:

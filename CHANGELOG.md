@@ -4,6 +4,28 @@
 
 All notable changes to Volt are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-11-08
+
+### Added
+- **A device table instead of a hard-coded pair.** `src/DeviceTable.cs` now holds 137 models across 28 vendors — 60 mice, 54 headsets, 13 keyboards, 7 receivers, 3 controllers — with 217 wireless product IDs and 58 cable product IDs. The table is keyed on VID:PID; a model that exposes both a dongle and a cable is one row, not two.
+- **A protocol registry instead of an `if` chain.** `src/ProtocolsVendor.cs` holds 23 vendor protocols plus a standard-HID fallback, each with a `Matches` predicate and a priority. `ProtocolRegistry.Probe` walks them in order and the first claimant gets the device, so adding a family no longer means editing a dispatcher.
+- **Feature-report support.** `HidNative.Handle` gained `SetFeature` / `GetFeature` / `SetOutputReport` / `GetInputReport`, and `HidQuery` gained `RunFeature` and `RunPush`. Razer, ASUS, Lamzu, Lenovo and the Logitech headsets all speak over feature reports; Sony, Audeze, Jabra, Corsair Virtuoso and SteelSeries only push.
+- **Headsets.** Corsair, Jabra, Lenovo, Plantronics, Audeze, SteelSeries, Sony and MCHOSE families, ported from [HeadsetControl](https://github.com/Sapd/HeadsetControl).
+- **Left, right and case.** `BatteryReading` carries `LeftPercent`, `RightPercent` and `CasePercent` in addition to `Percent`, and the flyout shows `L 88% R 87% C 100%` when more than one is present. Every open-source implementation reviewed collapses a TWS headset to one number — HeadsetControl parses all three Sony bytes and then returns `Math.Min(left, right)`.
+- **Earbud icon.** True-wireless models draw a pair of earbuds instead of a headset.
+- **A note field per model.** Devices that genuinely cannot report a level say so in the row instead of showing a blank or a fabricated number.
+- `docs/DEVICES.md`: the full table, generated from `src/DeviceTable.cs` so it cannot drift.
+
+### Changed
+- The scanner now groups HID collections by VID:PID and asks the registry, instead of walking a fixed catalogue and matching endpoints.
+- `DeviceTable.Fallback` only invents a row for unknown hardware when the device exposes the standard HID battery page (`0x0006` / `0x0020`). Unknown vendors without it are skipped, so cameras and card readers stay out of the list.
+- The flyout builds its rows from what was actually detected, caps at 7 visible rows and scrolls beyond that.
+- The README's supported-devices section is now a per-vendor summary pointing at `docs/DEVICES.md`, and the known-limitations section explains why most 2.4G audio dongles report nothing.
+
+### Fixed
+- **The 17-byte Compx frame was being sent to the 20-byte collection.** The ATK dongle exposes both on usage page `FF02/0002`, and the enumeration order puts the 20-byte one first. Every write was rejected and the mouse looked unsupported. `HidGroup.ByUsage` now takes the expected output length as a required argument.
+- Long device names were hard-clipped mid-letter in the row; they now ellipsize.
+
 ## [1.1.0] - 2026-11-08
 
 ### Added
@@ -44,6 +66,28 @@ All notable changes to Volt are documented here. Format follows [Keep a Changelo
 <sub>English · 简体中文</sub>
 
 本文件记录 Volt 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [1.2.0] - 2026-11-08
+
+### 新增
+- **用设备表取代硬编码的两台设备。** `src/DeviceTable.cs` 现在收录 137 个型号、28 个厂商 —— 60 只鼠标、54 副耳机、13 把键盘、7 个接收器、3 个手柄 —— 共 217 个无线产品 ID、58 个有线产品 ID。表以 VID:PID 为键；同时有接收器和有线的型号只占一行，不是两行。
+- **用协议注册表取代 `if` 分发。** `src/ProtocolsVendor.cs` 里有 23 套厂商协议加一个标准 HID 兜底，每套带 `Matches` 判断和优先级。`ProtocolRegistry.Probe` 按顺序走一遍，第一个认领的拿走设备，所以加协议族不用再改分发器。
+- **支持 Feature 报文。** `HidNative.Handle` 增加 `SetFeature` / `GetFeature` / `SetOutputReport` / `GetInputReport`，`HidQuery` 增加 `RunFeature` 和 `RunPush`。Razer、ASUS、Lamzu、Lenovo 和罗技耳机都走 Feature 报文；Sony、Audeze、Jabra、Corsair Virtuoso 和 SteelSeries 只等推送。
+- **耳机。** Corsair、Jabra、Lenovo、Plantronics、Audeze、SteelSeries、Sony、MCHOSE 各系列，从 [HeadsetControl](https://github.com/Sapd/HeadsetControl) 移植。
+- **左耳、右耳、充电盒。** `BatteryReading` 除 `Percent` 外还带 `LeftPercent`、`RightPercent`、`CasePercent`，多路存在时浮窗显示 `L 88% R 87% C 100%`。审过的每一个开源实现都把真无线耳机压成一个数 —— HeadsetControl 明明解析出 Sony 的三路字节，最后返回的是 `Math.Min(left, right)`。
+- **耳塞图标。** 真无线型号画两只耳塞，不再用头戴式耳机图标。
+- **每个型号一个说明字段。** 确实读不到电量的设备会如实写在行里，而不是显示空白或编一个数字。
+- `docs/DEVICES.md`：完整设备表，由 `src/DeviceTable.cs` 生成，不会与代码脱节。
+
+### 变更
+- 扫描器改为按 VID:PID 把 HID 集合分组再问注册表，不再走固定目录匹配端点。
+- `DeviceTable.Fallback` 只在这台未知设备暴露标准 HID 电池页（`0x0006` / `0x0020`）时才给它建一行。没有这个页的未知厂商直接跳过，摄像头和读卡器不会跑进列表。
+- 浮窗按实际探测到的设备建行，最多显示 7 行，超出滚动。
+- README 的支持设备一节改成按厂商汇总并指向 `docs/DEVICES.md`，已知限制里说明了为什么大多数 2.4G 音频接收器读不到东西。
+
+### 修复
+- **17 字节的 Compx 帧被发到了 20 字节的集合上。** ATK 接收器在用途页 `FF02/0002` 上把两个集合都暴露出来，而枚举顺序把 20 字节那个排在前面。每次写入都被拒，鼠标看起来就像不支持。`HidGroup.ByUsage` 现在把期望的输出长度做成必填参数。
+- 设备名过长时会在字母中间被硬裁，现在改用省略号。
 
 ## [1.1.0] - 2026-11-08
 

@@ -1,5 +1,6 @@
 Volt.exe
 FilterTests.exe
+DevicesDoc.exe
 *.obj
 *.pdb
 .vs/

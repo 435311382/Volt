@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace Volt
 {
@@ -24,6 +23,31 @@ namespace Volt
         public int VoltageMv = -1;
         public string Note = "";
         public bool Ok = false;
+
+        /// <summary>设备自己报出来的型号。罗技接收器上可能挂着好几个鼠标，只能靠这个区分。</summary>
+        public string ModelName = "";
+
+        /// <summary>用的是哪套协议，显示在副标题里，排查问题时有用。</summary>
+        public string Protocol = "";
+
+        /// <summary>接收器在，但配对的设备没唤醒。界面显示上次读数，不当成「没设备」。</summary>
+        public bool Asleep = false;
+
+        // ---- 分体式耳机的三路电量 ----
+        //
+        // 真无线耳塞（TWS）其实是三块电池：左耳、右耳、充电盒。
+        // 绝大多数开源实现把它们压成一个数（取左右最小值），因为上层数据结构只有一个字段。
+        // Volt 这边保留三路，界面按「左 / 右 / 盒」分三行小字显示。
+        // -1 表示这一路没读到（例如盒子没插耳机、或者协议本身不报）。
+
+        public int LeftPercent = -1;
+        public int RightPercent = -1;
+        public int CasePercent = -1;
+
+        public bool HasChannels
+        {
+            get { return LeftPercent >= 0 || RightPercent >= 0 || CasePercent >= 0; }
+        }
 
         public bool HasPercent
         {
@@ -55,22 +79,104 @@ namespace Volt
     }
 
     /// <summary>
-    /// 一台物理设备。可以有多个 Endpoint（接收器 / 数据线），
-    /// 但对外永远只呈现为一条记录。
+    /// 同一个 USB 设备暴露出来的所有 HID 集合。
+    /// 一个接收器通常有键盘、鼠标、厂商自定义等好几个集合，协议只在其中一个上说话。
     /// </summary>
-    public sealed class DeviceDefinition
+    public sealed class HidGroup
     {
-        public string Key = "";
-        public string DisplayName = "";
-        public string Kind = "";
-        public string Vendor = "";
-        public Endpoint[] Endpoints = new Endpoint[0];
+        public ushort Vid;
+        public ushort Pid;
+        public string Product = "";
+        public string Manufacturer = "";
+        public List<HidInterface> Interfaces = new List<HidInterface>();
 
-        public BatteryReading Read(HidInterface iface)
+        public string VidPid
         {
-            if (Key == "atk-compx") return AtkCompx.Read(iface);
-            if (Key == "aula-24g") return Aula24G.Read(iface);
-            return new BatteryReading();
+            get { return Vid.ToString("X4") + ":" + Pid.ToString("X4"); }
+        }
+
+        /// <summary>按 Usage Page / Usage 找集合。</summary>
+        public HidInterface ByUsage(ushort page, ushort usage)
+        {
+            for (int i = 0; i < Interfaces.Count; i++)
+            {
+                HidInterface x = Interfaces[i];
+                if (x.UsagePage == page && x.Usage == usage) return x;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 按 Usage Page / Usage + Output 长度精确找集合。
+        ///
+        /// 必须按长度挑，不能只按 usage 挑：同一个接收器上常有两组同 usage 的厂商集合，
+        /// 比如 ATK 的接收器同时暴露 20 字节和 17 字节两组 FF02/0002。
+        /// 只按 usage 取第一个，拿到的是 20 字节那组，往里写 17 字节帧会被拒绝，
+        /// 设备就永远"没应答"。
+        /// </summary>
+        public HidInterface ByUsage(ushort page, ushort usage, int outputLength)
+        {
+            for (int i = 0; i < Interfaces.Count; i++)
+            {
+                HidInterface x = Interfaces[i];
+                if (x.UsagePage == page && x.Usage == usage && x.OutputLength == outputLength) return x;
+            }
+            return null;
+        }
+
+        /// <summary>找厂商自定义页（0xFF00 以上）里 Output 长度最接近 want 的集合。</summary>
+        public HidInterface ByOutput(int want)
+        {
+            HidInterface best = null;
+            int bestGap = int.MaxValue;
+            for (int i = 0; i < Interfaces.Count; i++)
+            {
+                HidInterface x = Interfaces[i];
+                if (x.UsagePage < 0xFF00) continue;
+                if (x.OutputLength < want) continue;
+                int gap = x.OutputLength - want;
+                if (gap < bestGap) { bestGap = gap; best = x; }
+            }
+            return best;
+        }
+
+        /// <summary>找 Feature 报告长度够用的集合，优先厂商自定义页。</summary>
+        public HidInterface ByFeature(int minLength)
+        {
+            HidInterface fallback = null;
+            for (int i = 0; i < Interfaces.Count; i++)
+            {
+                HidInterface x = Interfaces[i];
+                if (x.FeatureLength < minLength) continue;
+                if (x.UsagePage >= 0xFF00) return x;
+                if (fallback == null) fallback = x;
+            }
+            return fallback;
+        }
+    }
+
+    /// <summary>
+    /// 一套取电量的协议。每套协议自己决定在哪个集合上、发什么帧、怎么解析。
+    /// </summary>
+    public abstract class BatteryProtocol
+    {
+        /// <summary>显示用的协议名。</summary>
+        public abstract string Name { get; }
+
+        /// <summary>数字越小越先尝试。厂商专属协议排在通用协议前面。</summary>
+        public abstract int Priority { get; }
+
+        /// <summary>这个设备像不像用这套协议的。只看 VID / 集合形状，不发帧。</summary>
+        public abstract bool Matches(HidGroup group);
+
+        /// <summary>真的去问一次。读不到返回 null。</summary>
+        public abstract BatteryReading Probe(HidGroup group);
+
+        protected static int Clamp(int value)
+        {
+            if (value < 0) return 0;
+            if (value > 100) return 100;
+            return value;
         }
     }
 
@@ -112,199 +218,87 @@ namespace Volt
             }
             return null;
         }
-    }
-    /// <summary>
-    /// ATK / VXE / 狼蛛 用的 Compx 方案帧（17 字节，Report ID 0x08）。
-    /// 布局：[0]=0x08 [1]=命令 [2]=状态 [3..4]=地址 [5]=长度 [6..15]=数据 [16]=校验
-    /// 校验 = 0x55 - sum(前 16 字节)，等价于整帧 16 字节和为 0x55。
-    /// 电量在 [6]，充电位在 [7]（1=充电中），电压大端在 [8..9]（mV）。
-    /// </summary>
-    public static class AtkCompx
-    {
+
         /// <summary>
-        /// 认一帧 ATK 应答。光看前两字节不够：同一个接口上还可能有
-        /// 别的报告混进来，把它们的第 6 字节当电量就会读出 116、123 这种值。
-        /// 整帧 17 字节的和必须等于 0x55，这一条能挡掉所有杂帧。
+        /// Feature 报告一问一答：SetFeature 发命令，等一下，GetFeature 取回同一份缓冲区。
+        /// 长度必须等于接口的 FeatureReportByteLength。
         /// </summary>
-        private static bool IsAtkReply(byte[] got)
+        public static byte[] RunFeature(HidInterface iface, byte[] request, int delayMs,
+            int attempts, int gapMs, Func<byte[], bool> accept)
         {
-            if (got == null || got.Length < 17) return false;
-            if (got[0] != 0x08 || got[1] != 0x04) return false;
-            int sum = 0;
-            for (int i = 0; i < 17; i++) sum += got[i];
-            return (sum & 0xFF) == 0x55;
-        }
-        public static BatteryReading Read(HidInterface iface)
-        {
-            BatteryReading r = new BatteryReading();
-            int len = iface.OutputLength;
-            if (len < 17) return r;
-
-            byte[] req = new byte[len];
-            req[0] = 0x08;
-            req[1] = 0x04;
-
-            // 校验放在这一帧实际使用的那一位上
-            int sum = 0;
-            for (int i = 0; i < 16; i++) sum += req[i];
-            req[16] = (byte)((0x55 - (sum & 0xFF)) & 0xFF);
-            if (len > 17)
+            LastOpenOk = true;
+            for (int attempt = 0; attempt < attempts; attempt++)
             {
-                // 20 字节接口不收这个帧，但仍然把校验算完整
-                req[len - 1] = req[16];
-                req[16] = 0x00;
-                sum = 0;
-                for (int i = 0; i < len - 1; i++) sum += req[i];
-                req[len - 1] = (byte)((0x55 - (sum & 0xFF)) & 0xFF);
+                HidNative.Handle h = HidNative.Handle.Open(iface.Path);
+                if (h == null || !h.IsOpen)
+                {
+                    LastOpenOk = false;
+                    if (h != null) h.Dispose();
+                    return null;
+                }
+
+                byte[] got = null;
+                try
+                {
+                    if (h.SetFeature(request))
+                    {
+                        System.Threading.Thread.Sleep(delayMs);
+                        byte[] response = new byte[request.Length];
+                        response[0] = request[0];
+                        if (h.GetFeature(response)) got = response;
+                    }
+                }
+                finally
+                {
+                    h.Close();
+                }
+
+                if (got != null && accept(got)) return got;
+                if (attempt < attempts - 1) System.Threading.Thread.Sleep(gapMs);
             }
-
-            byte[] resp = HidQuery.Run(iface, req, 4, 400, 120, new Func<byte[], bool>(IsAtkReply));
-            if (resp == null && !HidQuery.LastOpenOk)
-            {
-                r.Note = "打不开接口";
-                return r;
-            }
-
-            if (resp == null)
-            {
-                r.Note = "设备未应答（可能正在休眠，动一下就好）";
-                return r;
-            }
-
-            r.Percent = resp[6];
-            r.RawPercent = resp[6];
-            int chargeByte = resp[7];
-            if (chargeByte == 1) r.Charge = ChargeState.Charging;
-            else r.Charge = ChargeState.Discharging;
-
-            if (resp.Length >= 10)
-            {
-                int mv = (resp[8] << 8) | resp[9];
-                if (mv > 2000 && mv < 5000) r.VoltageMv = mv;
-            }
-
-            if (r.Percent == 100 && r.Charge == ChargeState.Charging) r.Charge = ChargeState.Full;
-            // 帧本身解析成功就算 Ok。电量是否在 0..100 由过滤器判断，
-            // 因为固件偶尔会报出 116、123 这种超范围值，那是它自己的测量问题，
-            // 不代表这一帧没读到。
-            r.Ok = true;
-            return r;
-        }
-    }
-
-    /// <summary>
-    /// 狼蛛 / AULA 20 字节帧（Report ID 0x13）。
-    /// 请求：13 CA 后补零，末字节 = sum8(前 19 字节)。
-    ///
-    /// 接收器会回两种格式，两种都得认，否则其中一种会被当成没应答：
-    ///   13 4A 01 00 02 &lt;电量&gt; &lt;状态&gt; ...   电量在 [5]
-    ///   13 0A 01 00 04 05 &lt;电量&gt; &lt;状态&gt; ...  电量在 [6]
-    /// 状态 0x10 = 充电中，0x01 = 未充电。
-    /// </summary>
-    public static class Aula24G
-    {
-        private static readonly byte[] Prefix4A = new byte[] { 0x13, 0x4A, 0x01, 0x00, 0x02 };
-        private static readonly byte[] Prefix0A = new byte[] { 0x13, 0x0A, 0x01, 0x00, 0x04, 0x05 };
-
-        public static BatteryReading Read(HidInterface iface)
-        {
-            BatteryReading r = new BatteryReading();
-            int len = iface.OutputLength;
-            if (len < 20) return r;
-
-            byte[] req = new byte[len];
-            req[0] = 0x13;
-            req[1] = 0xCA;
-            int sum = 0;
-            for (int i = 0; i < len - 1; i++) sum += req[i];
-            req[len - 1] = (byte)(sum & 0xFF);
-
-            byte[] resp = HidQuery.Run(iface, req, 4, 600, 800, new Func<byte[], bool>(Matches));
-            if (resp == null && !HidQuery.LastOpenOk)
-            {
-                r.Note = "打不开接口";
-                return r;
-            }
-
-            if (resp == null)
-            {
-                r.Note = "键盘未应答（可能正在休眠，按一下键就好）";
-                return r;
-            }
-
-            int pctOffset;
-            int statusOffset;
-            if (StartsWith(resp, Prefix4A)) { pctOffset = 5; statusOffset = 6; }
-            else { pctOffset = 6; statusOffset = 7; }
-
-            r.RawPercent = resp[pctOffset];
-            r.Percent = resp[pctOffset];
-            int status = resp[statusOffset];
-            if (status == 0x10) r.Charge = ChargeState.Charging;
-            else if (status == 0x01) r.Charge = ChargeState.Discharging;
-            else r.Charge = ChargeState.Unknown;
-
-            if (r.Percent == 100 && r.Charge == ChargeState.Charging) r.Charge = ChargeState.Full;
-            // 同上：解析成功就算 Ok，电量范围交给过滤器判断
-            r.Ok = true;
-            return r;
+            return null;
         }
 
-        private static bool Matches(byte[] resp)
+        /// <summary>
+        /// 只写不读，然后等设备主动推一个 Input 报告（推送式协议用）。
+        /// </summary>
+        public static byte[] RunPush(HidInterface iface, byte[] request, int readLength,
+            int timeoutMs, int attempts, int gapMs, Func<byte[], bool> accept)
         {
-            return StartsWith(resp, Prefix4A) || StartsWith(resp, Prefix0A);
+            LastOpenOk = true;
+            for (int attempt = 0; attempt < attempts; attempt++)
+            {
+                HidNative.Handle h = HidNative.Handle.Open(iface.Path);
+                if (h == null || !h.IsOpen)
+                {
+                    LastOpenOk = false;
+                    if (h != null) h.Dispose();
+                    return null;
+                }
+
+                byte[] got = null;
+                try
+                {
+                    if (request != null) h.Write(request);
+                    got = h.Read(readLength, timeoutMs);
+                }
+                finally
+                {
+                    h.Close();
+                }
+
+                if (got != null && accept(got)) return got;
+                if (attempt < attempts - 1) System.Threading.Thread.Sleep(gapMs);
+            }
+            return null;
         }
 
-        private static bool StartsWith(byte[] resp, byte[] prefix)
+        public static bool StartsWith(byte[] data, params byte[] prefix)
         {
-            if (resp == null || resp.Length < prefix.Length + 2) return false;
+            if (data == null || data.Length < prefix.Length) return false;
             for (int i = 0; i < prefix.Length; i++)
-                if (resp[i] != prefix[i]) return false;
+                if (data[i] != prefix[i]) return false;
             return true;
-        }
-    }
-
-    /// <summary>
-    /// 设备清单。这里就是「型号不能认错」的唯一依据——
-    /// 全部来自本机实测，不是猜的。
-    /// </summary>
-    public static class Catalog
-    {
-        public static List<DeviceDefinition> Build()
-        {
-            List<DeviceDefinition> list = new List<DeviceDefinition>();
-
-            // ---------------- ATK X1 SE ----------------
-            // 2.4G 接收器 373B:10C9 与 有线/星闪 373B:1107 用的是同一套 17 字节帧，
-            // 所以两者归成同一台设备，只按当前接入方式标注。
-            DeviceDefinition mouse = new DeviceDefinition();
-            mouse.Key = "atk-compx";
-            mouse.DisplayName = "ATK X1 SE";
-            mouse.Kind = "鼠标";
-            mouse.Vendor = "ATK";
-            mouse.Endpoints = new Endpoint[]
-            {
-                new Endpoint { Vid = 0x373B, Pid = 0x10C9, UsagePage = 0xFF02, Usage = 0x0002,
-                               InputLength = 17, OutputLength = 17, Transport = "2.4G 接收器" },
-                new Endpoint { Vid = 0x373B, Pid = 0x1107, UsagePage = 0xFF02, Usage = 0x0002,
-                               InputLength = 17, OutputLength = 17, Transport = "USB 有线" }
-            };
-            list.Add(mouse);
-
-            // ---------------- AULA F99 ----------------
-            DeviceDefinition keyboard = new DeviceDefinition();
-            keyboard.Key = "aula-24g";
-            keyboard.DisplayName = "AULA F99";
-            keyboard.Kind = "键盘";
-            keyboard.Vendor = "AULA";
-            keyboard.Endpoints = new Endpoint[]
-            {
-                new Endpoint { Vid = 0x3554, Pid = 0xFA09, UsagePage = 0xFF02, Usage = 0x0002,
-                               InputLength = 20, OutputLength = 20, Transport = "2.4G 接收器" }
-            };
-            list.Add(keyboard);
-
-            return list;
         }
     }
 }

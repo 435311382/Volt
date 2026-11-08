@@ -86,6 +86,16 @@ namespace Volt
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding
             | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;
 
+        /// <summary>
+        /// 和 LeftMid 一样，但放不下时用省略号收尾。
+        /// 型号名长短不一（「Razer DeathStalker V2 Pro TKL」这种），
+        /// 硬裁会把最后一个字母切成半个，加省略号至少看得出是被截断的。
+        /// </summary>
+        public const TextFormatFlags LeftMidEllipsis =
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding
+            | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine
+            | TextFormatFlags.EndEllipsis | TextFormatFlags.WordEllipsis;
+
         public const TextFormatFlags RightMid =
             TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding
             | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine;

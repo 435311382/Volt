@@ -8,8 +8,8 @@ using System.Windows.Forms;
 namespace Volt
 {
     /// <summary>
-    /// 托盘图标点开的小浮窗。行为和 Twinkle Tray 一致：
-    /// 点托盘图标弹出，点外面自动收起，不进任务栏。
+    /// 托盘图标点开的小浮窗：点托盘图标弹出，点外面自动收起，不进任务栏。
+    /// 只显示这一轮真正探测到的设备——没插的设备不占地方。
     /// </summary>
     public sealed class MainForm : Form
     {
@@ -20,12 +20,16 @@ namespace Volt
         private const int RowH = 66;
         private const int FooterH = 40;
 
+        // 最多同时显示几行，再多就滚动。设备表扩到上百个型号之后，
+        // 按「探测到几个就长多高」会把窗口撑出屏幕。
+        private const int MaxRows = 7;
+
         // 面板开着时勤快一点，收起后放慢——见构造函数里的说明。
         private const int VisibleIntervalMs = 5000;
         private const int HiddenIntervalMs = 45000;
 
-        private readonly List<DeviceDefinition> _catalog;
         private readonly List<DeviceRow> _rows = new List<DeviceRow>();
+        private readonly Panel _list = new Panel();
         private readonly Timer _timer = new Timer();
         private readonly float _s;
 
@@ -56,7 +60,6 @@ namespace Volt
         public MainForm()
         {
             _s = DeviceDpi / 96f;
-            _catalog = Catalog.Build();
 
             // 刻意不用 OptimizedDoubleBuffer：
             // 它的后台缓冲是 32bppARGB，GDI 文字画进带 alpha 的位图会禁用 ClearType，
@@ -76,7 +79,11 @@ namespace Volt
             MinimizeBox = false;
             MaximizeBox = false;
 
-            BuildLayout();
+            _list.BackColor = Theme.WindowBg;
+            _list.BorderStyle = BorderStyle.None;
+            Controls.Add(_list);
+
+            BuildLayout(new List<DeviceState>());
             BuildTray();
 
             // 两档轮询：窗口开着时 5 秒一次，收起后 45 秒一次。
@@ -154,24 +161,53 @@ namespace Volt
             catch { }
         }
 
-        private void BuildLayout()
+        /// <summary>
+        /// 按这一轮的设备数量重建列表。数量没变就只更新数值，不重建控件——
+        /// 每次重建会让滚动位置和悬停状态复位。
+        /// </summary>
+        private void BuildLayout(List<DeviceState> states)
         {
-            int rowsH = _catalog.Count * Px(RowH);
-            int h = Px(TitleH) + rowsH + Px(FooterH);
+            int count = states.Count;
+            if (count == 0) count = 1;   // 空态也占一行，写「未检测到设备」
+
+            int visible = count > MaxRows ? MaxRows : count;
+            int contentH = visible * Px(RowH);
+            int h = Px(TitleH) + contentH + Px(FooterH);
+
+            bool sizeChanged = ClientSize.Height != h || ClientSize.Width != Px(WindowWidth);
             ClientSize = new Size(Px(WindowWidth), h);
 
-            for (int i = 0; i < _catalog.Count; i++)
+            _list.Location = new Point(0, Px(TitleH));
+            _list.Size = new Size(ClientSize.Width, contentH);
+
+            bool needScroll = count > MaxRows;
+            if (_list.AutoScroll != needScroll) _list.AutoScroll = needScroll;
+
+            if (_rows.Count != count)
             {
-                DeviceRow row = new DeviceRow(_catalog[i], _s);
-                row.Location = new Point(0, Px(TitleH) + i * Px(RowH));
-                row.Size = new Size(ClientSize.Width, Px(RowH));
-                _rows.Add(row);
-                Controls.Add(row);
+                for (int i = 0; i < _rows.Count; i++)
+                {
+                    _list.Controls.Remove(_rows[i]);
+                    _rows[i].Dispose();
+                }
+                _rows.Clear();
+
+                int rowW = Px(WindowWidth) - (needScroll ? SystemInformation.VerticalScrollBarWidth : 0);
+                for (int i = 0; i < count; i++)
+                {
+                    DeviceRow row = new DeviceRow(_s);
+                    row.Location = new Point(0, i * Px(RowH));
+                    row.Size = new Size(rowW, Px(RowH));
+                    _rows.Add(row);
+                    _list.Controls.Add(row);
+                }
             }
 
             _closeRect = new Rectangle(ClientSize.Width - Px(Pad) - Px(14), Px(14), Px(14), Px(14));
             _refreshRect = new Rectangle(ClientSize.Width - Px(Pad) - Px(14),
                 ClientSize.Height - Px(FooterH) + Px(13), Px(14), Px(14));
+
+            if (sizeChanged && Visible) PositionFlyout();
         }
 
         /// <summary>
@@ -259,8 +295,7 @@ namespace Volt
         // ================================================================
 
         // 浮窗刻意不可拖动：它是贴在任务栏上方的弹出面板，
-        // 位置由 PositionFlyout() 决定，和 Twinkle Tray 一致。
-        // 之前用 HTCAPTION 让标题栏可拖动，结果一点就飘走，很难用。
+        // 位置由 PositionFlyout() 决定。
 
         private const int WM_ERASEBKGND = 0x0014;
 
@@ -371,32 +406,6 @@ namespace Volt
             _tray.ContextMenuStrip = menu;
         }
 
-        /// <summary>
-        /// 托盘图标优先用 exe 里的多尺寸 ICO。
-        /// 运行时画的图标在部分 Windows 11 版本上会因 DPI 缩放变得很淡，
-        /// 多尺寸资源由系统自己挑，清晰度稳定。
-        /// </summary>
-        private static Icon LoadAppIcon()
-        {
-            try
-            {
-                string exe = System.Windows.Forms.Application.ExecutablePath;
-                Icon ic = Icon.ExtractAssociatedIcon(exe);
-                if (ic != null) return ic;
-            }
-            catch { }
-
-            try
-            {
-                string ico = System.IO.Path.Combine(
-                    System.IO.Path.GetDirectoryName(System.Windows.Forms.Application.ExecutablePath),
-                    "app.ico");
-                if (System.IO.File.Exists(ico)) return new Icon(ico);
-            }
-            catch { }
-
-            return TrayIcon.Build(80, false);
-        }
         public void Quit()
         {
             _reallyExit = true;
@@ -420,7 +429,7 @@ namespace Volt
             {
                 List<DeviceState> states = null;
                 string err = null;
-                try { states = Scanner.Scan(_catalog); }
+                try { states = Scanner.Scan(); }
                 catch (Exception ex) { err = ex.Message; }
 
                 try
@@ -446,20 +455,28 @@ namespace Volt
 
             _stampText = "更新于 " + DateTime.Now.ToString("HH:mm:ss");
 
+            BuildLayout(states);
+
             List<string> tips = new List<string>();
             int lowest = -1;
             bool charging = false;
 
-            for (int i = 0; i < _rows.Count && i < states.Count; i++)
+            for (int i = 0; i < _rows.Count; i++)
             {
-                _rows[i].State = states[i];
-                DeviceState s = states[i];
-                if (s.Present && s.Reading != null && s.Reading.Ok)
+                if (i < states.Count)
                 {
-                    tips.Add(s.Def.DisplayName + " " + s.Percent + "%");
-                    if (lowest < 0 || s.Percent < lowest) lowest = s.Percent;
-                    if (s.Charge == ChargeState.Charging) charging = true;
-                    if (s.Charge == ChargeState.Charging) charging = true;
+                    DeviceState s = states[i];
+                    _rows[i].State = s;
+                    if (s.Present && s.Reading != null && s.Reading.Ok)
+                    {
+                        tips.Add(s.DisplayName + " " + s.Percent + "%");
+                        if (lowest < 0 || s.Percent < lowest) lowest = s.Percent;
+                        if (s.Charge == ChargeState.Charging) charging = true;
+                    }
+                }
+                else
+                {
+                    _rows[i].State = null;   // 空态行
                 }
             }
 
@@ -495,7 +512,7 @@ namespace Volt
 
     /// <summary>
     /// 一行设备。不画卡片底、不画描边——
-    /// 靠留白和一条细轨道分隔，这是扁平设计的关键。
+    /// 靠留白和一条细轨道分隔。
     /// 结构：图标 + 名称 + 连接/状态，一条全宽细轨道，右侧大号百分比。
     /// </summary>
     public sealed class DeviceRow : Control
@@ -503,18 +520,16 @@ namespace Volt
         private DeviceState _state;
         private readonly float _s;
 
-        public DeviceRow(DeviceDefinition def, float scale)
+        public DeviceRow(float scale)
         {
             _s = scale;
             // 同上：不用双缓冲，保住 ClearType
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint
                 | ControlStyles.ResizeRedraw, true);
             BackColor = Theme.WindowBg;
-            _state = new DeviceState();
-            _state.Def = def;
-            _state.Error = "正在读取…";
         }
 
+        /// <summary>null 表示空态（一台设备都没探到）。</summary>
         public DeviceState State
         {
             get { return _state; }
@@ -523,11 +538,18 @@ namespace Volt
 
         private int Px(double v) { return (int)Math.Round(v * _s); }
 
-        private static string KindGlyph(string kind)
+        /// <summary>
+        /// 设备类型图标。U+E7F6 是头戴式耳机，U+F4C0 是单只耳塞——
+        /// TWS 左右耳各一只，画头戴式会误导。两个码位在 Segoe Fluent Icons
+        /// 与 Segoe MDL2 Assets 里都有，换字体也不会变豆腐块。
+        /// </summary>
+        private static string KindGlyph(string kind, bool earbuds)
         {
+            if (kind == "耳机") return earbuds ? "\uF4C0" : "\uE7F6";
             if (kind == "鼠标") return "\uE962";
             if (kind == "键盘") return "\uE765";
-            if (kind == "耳机") return "\uE7F6";
+            if (kind == "手柄") return "\uE7FC";
+            if (kind == "接收器") return "\uECF0";
             return "\uE7F8";
         }
 
@@ -537,17 +559,30 @@ namespace Volt
             Theme.SetupGraphics(g);
             g.Clear(Theme.WindowBg);
 
-            bool live = _state.Present && _state.Reading != null && _state.Reading.Ok;
-            int pct = live ? _state.Percent : -1;
-
             int pad = Px(16);
             int iconW = Px(24);
             int textX = pad + iconW + Px(6);
 
-            // ---- 图标 ----
-            using (Font f = Theme.Icon(12f))
+            if (_state == null)
             {
-                TextRenderer.DrawText(g, KindGlyph(_state.Def.Kind), f,
+                using (Font f = Theme.Ui(10f))
+                {
+                    TextRenderer.DrawText(g, "未检测到设备", f,
+                        new Rectangle(pad, 0, Width - pad * 2, Height),
+                        Theme.TextTertiary, Theme.LeftMid);
+                }
+                return;
+            }
+
+            bool live = _state.Present && _state.Reading != null && _state.Reading.Ok;
+            int pct = live ? _state.Percent : -1;
+
+            // ---- 图标 ----
+            // 耳塞那个字形（两只分开的小耳塞）笔画细，12pt 下糊成一团，
+            // 单独放大一点才看得出是耳塞而不是头戴耳机。
+            using (Font f = Theme.Icon(_state.Earbuds ? 13.5f : 12f))
+            {
+                TextRenderer.DrawText(g, KindGlyph(_state.Kind, _state.Earbuds), f,
                     new Rectangle(pad, 0, iconW, Px(32)),
                     live ? Theme.TextPrimary : Theme.TextTertiary, Theme.LeftMid);
             }
@@ -555,9 +590,9 @@ namespace Volt
             // ---- 名称 ----
             using (Font f = Theme.UiSemibold(11.5f))
             {
-                TextRenderer.DrawText(g, _state.Def.DisplayName, f,
+                TextRenderer.DrawText(g, _state.DisplayName, f,
                     new Rectangle(textX, Px(5), Width - textX - Px(86), Px(19)),
-                    Theme.TextPrimary, Theme.LeftMid);
+                    Theme.TextPrimary, Theme.LeftMidEllipsis);
             }
 
             // ---- 连接方式 · 状态 ----
@@ -573,7 +608,7 @@ namespace Volt
             }
             else
             {
-                string transport = _state.Transport.Length > 0 ? _state.Transport : _state.Def.Kind;
+                string transport = _state.Transport.Length > 0 ? _state.Transport : _state.Kind;
                 string st;
                 if (_state.Charge == ChargeState.Charging) { st = "充电中"; subColor = Theme.Good; }
                 else if (_state.Charge == ChargeState.Full) { st = "已充满"; subColor = Theme.Good; }
@@ -581,14 +616,29 @@ namespace Volt
                 else st = "状态未知";
 
                 if (_state.Stale) { st = "上次 " + _state.LastGood.ToString("HH:mm"); subColor = Theme.TextTertiary; }
-                sub = transport + "  ·  " + st;
+
+                // 分体式耳机：左右耳和充电盒是三块独立的电池，
+                // 只报一个「最小值」会把「左耳快没电、右耳还很足」这种真实情况藏起来。
+                // 这一行放不下三个中文标签，用 L / R / C 三个字母，和型号名一样保持英文。
+                if (_state.HasChannels)
+                {
+                    string ch = "";
+                    if (_state.LeftPercent >= 0) ch += "L " + _state.LeftPercent + "%";
+                    if (_state.RightPercent >= 0) ch += (ch.Length > 0 ? "  " : "") + "R " + _state.RightPercent + "%";
+                    if (_state.CasePercent >= 0) ch += (ch.Length > 0 ? "  " : "") + "C " + _state.CasePercent + "%";
+                    sub = ch.Length > 0 ? ch : transport + "  ·  " + st;
+                }
+                else
+                {
+                    sub = transport + "  ·  " + st;
+                }
             }
 
             using (Font f = Theme.Ui(9f))
             {
                 TextRenderer.DrawText(g, sub, f,
                     new Rectangle(textX, Px(25), Width - textX - Px(86), Px(15)),
-                    subColor, Theme.LeftMid);
+                    subColor, Theme.LeftMidEllipsis);
             }
 
             // ---- 百分比：数字大、百分号小，整体右对齐 ----
