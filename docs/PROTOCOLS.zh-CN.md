@@ -138,7 +138,7 @@ Baseus AeQur G10（`10D6:4801`）就是现成的例子。它暴露两个厂商�
 - `0x55` 和 `0x41` 是 **Actions ADFU 引导模式的入口触发器**。往这两个报告 ID 写 Output 报文会把接收器切进固件升级模式，必须物理拔插才能恢复。
 - `0x06` 和 `0x07` 是 Consumer Control（音量）和 Telephony（静音 LED）。
 
-按杰理那套 TLV 查询在这两个通道上试了 48 种组合，零回复 —— 与「本来就没有东西可回」是一致的。Volt 会把这台设备列出来，并写「2.4G 接收器不上报电量」，而不是编一个数字。
+按杰理那套 TLV 查询在这两个通道上试了 48 种组合，零回复 —— 与「本来就没有东西可回」是一致的。已知处于这种状态的型号会在 `src/DeviceTable.cs` 里带一句说明，并且不显示在浮窗里 —— 否则就是一行永远填不上的空行。
 
 依据：[`ryan-mant/AreYouLowBattery`](https://github.com/ryan-mant/AreYouLowBattery) 的 `areyoulowbattery/handlers/actions.py`，文件头对 `10d6:4802` 记录了同样的发现。
 

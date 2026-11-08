@@ -138,7 +138,7 @@ The Baseus AeQur G10 (`10D6:4801`) is the worked example. It exposes two vendor 
 - `0x55` and `0x41` are **Actions ADFU bootloader entry triggers**. Writing an output report to either one puts the dongle into firmware-upgrade mode until it is physically replugged.
 - `0x06` and `0x07` are Consumer Control (volume) and Telephony (mute LED).
 
-Forty-eight combinations of a JieLi-style TLV query across those channels produced zero replies, which is consistent with there being nothing to reply. Volt lists the device and writes "2.4G receiver does not report battery" rather than inventing a number.
+Forty-eight combinations of a JieLi-style TLV query across those channels produced zero replies, which is consistent with there being nothing to reply. A model known to be in this state is marked with a note in `src/DeviceTable.cs` and is left out of the flyout rather than shown as a permanent blank row — the alternative was a row that can never fill in.
 
 Source: [`ryan-mant/AreYouLowBattery`](https://github.com/ryan-mant/AreYouLowBattery), `areyoulowbattery/handlers/actions.py`, whose header documents the same finding for `10d6:4802`.
 

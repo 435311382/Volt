@@ -4,6 +4,11 @@
 
 All notable changes to Volt are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-11-08
+
+### Changed
+- **Devices that cannot report a level are no longer shown.** A model marked in the device table as having no battery channel over its connection (most 2.4G audio dongles) used to sit in the flyout as a permanent row saying so. It is now left out entirely. If it ever does answer — a protocol gets added, or it is plugged in over a different transport — it appears on its own.
+
 ## [1.2.0] - 2026-11-08
 
 ### Added
@@ -66,6 +71,11 @@ All notable changes to Volt are documented here. Format follows [Keep a Changelo
 <sub>English · 简体中文</sub>
 
 本文件记录 Volt 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [1.2.1] - 2026-11-08
+
+### 变更
+- **读不到电量的设备不再显示。** 型号表里标注为「当前连接方式没有电量通道」的型号（大多数 2.4G 音频接收器），以前会在浮窗里长期占一行说明文字，现在直接不出现。哪天它真能应答了 —— 补上协议、或者换了连接方式 —— 它会自己出现。
 
 ## [1.2.0] - 2026-11-08
 

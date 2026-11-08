@@ -155,7 +155,7 @@ The 38 cases cover the decrease-only rule: ordinary discharge, a level that rebo
 ## Known limitations
 
 - Windows only. The HID layer is Win32.
-- **2.4G audio dongles generally do not report battery.** Most headsets expose charge only over Bluetooth (BLE GATT or vendor broadcasts), not over the USB dongle. Volt lists them and says so rather than showing a fake number. The Baseus AeQur G10 is one: its report IDs `0x55` / `0x41` are firmware-upgrade triggers, not telemetry — writing to them can switch the dongle into bootloader mode.
+- **2.4G audio dongles generally do not report battery.** Most headsets expose charge only over Bluetooth (BLE GATT or vendor broadcasts), not over the USB dongle. Models known to be like this are marked in the device table and are hidden from the flyout instead of sitting there as a permanent blank row — if one ever does answer, it appears. The Baseus AeQur G10 is one: its report IDs `0x55` / `0x41` are firmware-upgrade triggers, not telemetry — writing to them can switch the dongle into bootloader mode.
 - Polling resets the device idle timer, which costs a little battery. The closed-flyout interval is 45 seconds for that reason; raise it in `MainForm` if it still matters.
 - Two battery tools running at once will fight over the same HID handle. Close the vendor software.
 - Protocols were ported from open-source projects and documentation, not verified against every listed model. Volt only claims to read the families it ships code for; individual models in the table are best-effort. Unverified models are marked in [docs/DEVICES.md](docs/DEVICES.md).

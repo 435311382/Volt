@@ -308,10 +308,23 @@ namespace Volt
 
             List<DeviceState> result = new List<DeviceState>();
 
+            // 有些设备被型号表标注成「拿不到电量」（model.Note 非空），比如那些
+            // 2.4G 音频接收器在硬件层面就不上报电量的耳机。这种设备留在界面上
+            // 只是一行永远读数的占位，对用户没用，所以从来读到过值的直接不显示。
+            // 一旦某天真读到了值（协议后来补上、或换了连接方式），它照样会显示。
+            HashSet<string> hidden = new HashSet<string>();
+
             for (int i = 0; i < order.Count; i++)
             {
                 string key = order[i];
                 DeviceState st = byKey[key];
+
+                if (st.Model != null && st.Model.Note.Length > 0
+                    && (st.Reading == null || !st.Reading.Ok))
+                {
+                    hidden.Add(key);
+                    continue;
+                }
 
                 if (st.Reading != null && st.Reading.Ok)
                 {
@@ -341,6 +354,7 @@ namespace Volt
             foreach (string key in _lastSeen)
             {
                 if (byKey.ContainsKey(key)) continue;
+                if (hidden.Contains(key)) continue;
                 DeviceState st = new DeviceState();
                 st.Key = key;
                 st.Model = new DeviceModel();
@@ -361,7 +375,11 @@ namespace Volt
             }
 
             _lastSeen.Clear();
-            foreach (string key in order) _lastSeen.Add(key);
+            foreach (string key in order)
+            {
+                if (hidden.Contains(key)) continue;
+                _lastSeen.Add(key);
+            }
 
             SaveCache();
             return result;
